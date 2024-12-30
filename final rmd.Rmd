@@ -1,0 +1,817 @@
+---
+title: "Uncovering Crime Trends: An Inferential Analysis of Crime Rates and Influencing Factors in Barranquilla, Columbia"
+author: "Valerie De La Fuente, PSTAT 131"
+date: "2024-12-08"
+class: "PSTAT 131"
+output:
+  html_document:
+    toc: true
+  pdf_document:
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+```
+
+## Introduction
+
+The purpose of this project is to investigate and identify which features have the greatest effect on daily crime rates in Barranquilla, Colombia, from the years 2010 to 2016. Crime rates are influenced by a variety of factors, including but not limited to time of year, weather conditions, and holidays. Understanding crime patterns is crucial to improving public safety and developing data-driven strategies for crime prevention. We aim to uncover the relationships between daily crime rates and various environmental and societal factors by analyzing this crime data. To achieve this, we will employ machine learning methods and predictive models.
+
+Even though the data in this study is nearly 10 years old, the insight from this analysis may be beneficial for many reasons. Comparative analysis with current data can be applied to this study to analyze how crime trends and patterns have shifted over time. Additionally, certain factors involved in this study may still have relevance today. If similar features continue to impact crime rates in Barranquilla, then policies and resources addressing these factors can be reformed for current application. Lastly, this study can act as a foundation for future research on crime rates in the region. Researchers may refine the methods used, incorporate new variables, and broaden the study to track crime patterns over multiple years.
+
+! [Barranquilla, Colombia](./pic2.png)
+
+## Viewing and Tidying Raw Data
+
+### Loading Data and Packages
+
+```{r}
+# Loading relevant packages
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+library(corrr)
+library(corrplot)
+library(readxl)
+library(Hmisc)
+library(dplyr)
+library(vip)
+library(yardstick)
+library(broom)
+library(reshape2)
+
+# Reading in the data
+crime <- read_excel("database.xlsx")
+
+# Set seed for reproducibility
+set.seed(12345)
+```
+
+I am obtaining the dataset, "Crime," from Mendeley Data through this link: https://data.mendeley.com/datasets/836wyfy5rn/1. This dataset was created by Juan C. Trujillo and Peter Howley. It was created using crime rates from the Colombian Institute of Legal Medicine and Forensic Studies and weather variables from the Colombian Institute of Hydrology, Meteorology and Environmental Studies.
+
+### Exploring Raw Data
+
+```{r}
+dim(crime)
+```
+
+There are 2,557 observations (rows) and 18 variables (columns).
+
+```{r}
+head(crime)
+```
+
+This is a glimpse of what the data looks like.
+
+### Codebook
+
+There are 2,557 observations and 18 columns in the raw dataset. The columns are as follows:
+
+* `date`: A date variable in the yyyy-mm-dd format.
+
+* `year`: A numeric variable representing the year.
+
+* `month`: A character variable representing the month name, such as January, February, March, and so on.
+
+* `number_month`: A numeric value representing the month as a number, where January = 1, February = 2, March = 3, April = 4, May = 5, June = 6, July = 7, August = 8, September = 9, October = 10, November = 11, and December = 12.
+
+* `day`: A character variable representing the day of the week: Friday, Saturday, Sunday, Monday, Tuesday, Wednesday, or Thursday.
+
+* `number_day`: A numeric variable representing the day of the week as a number, where Friday = 1, Saturday = 2, Sunday = 3, Monday = 4, Tuesday = 5, Wednesday = 6, and Thursday = 7.
+
+* `interpersviolence`: A numeric variable representing the daily total number of non-lethal, interpersonal violence cases that occur between the hours of 00:00 and 23:59.
+
+* `homicides`: A numeric variable representing the daily total number of homicide cases that occur between the hours of 0:00 and 23:59.
+
+* `maxtemp`: A numeric variable representing the daily maximum temperature in degrees Celsius.
+
+* `humid`: A numeric variable representing the daily average relative humidity percentage.
+
+* `precipitations`: A numeric variable representing the daily total precipitation amount in mm.
+
+* `windspeed`: A numeric variable representing the daily average wind speed in kph.
+
+* `moonlight`: A numeric variable representing the daily percent of illumination on the Moon's surface.
+
+* `holidays`: A binary numeric variable representing whether or not it is a holiday, where holidays = 1 and non-holidays = 0.
+
+* `weekends`: A binary numeric variable representing whether or not it is a weekend, where weekends = 1 and weekdays = 0.
+
+* `fines`: A numeric variable representing the daily number of fines attributed to driving under the influence. This value is used as a proxy for alcohol consumption.
+
+* `vehicles`: A numeric variable representing the daily registration of civilian vehicles. This value is used as a proxy to reflect shifts in overall economic conditions.
+
+* `heatindex`: A numeric variable representing how hot it feels in degrees Celcius to the human body when accounting for both air-temperature and humidity.
+
+The variables `month` and `number_month`, as well as `day` and `number_day`, are perfectly correlated because they represent the same information in different formats. To simplify analysis, we will drop `month` and `day` and retain the numeric formats. Due to high correlation, we will drop `date` and will retain `number_month`, `number_day`, and `year` to analyze the data at the year-month-day level.
+
+It is important to note that the variable `heatindex` is a combined measure of both `maxtemp` and `humid`. We will drop `heatindex` to prevent multicollinearity.
+
+### Variable Selection
+
+We will now remove `month`, `day`, `date` and `headindex` variables to minimize redundancy.
+
+```{r}
+# Removing 'month' and 'day' variables
+crime <- crime %>% 
+  select(-'month', -'day', -'heatindex', -'date')
+
+# Ensure updates were made
+head(crime)
+```
+
+The dataset now has 14 columns, as desired.
+
+### Tidying the Outcome Variable
+
+In this study, we intend to combine both `interpersviolence` and `homicides` to into a single outcome variable, `crime_rates`, to examine overall violent crime patterns.
+
+```{r}
+# Combining 'interpersviolence' and 'homicides' into one outcome variable
+crime_updated <- crime %>% 
+  mutate(crime_rates = interpersviolence + homicides)
+
+# Remove 'interpersviolence' and 'homicides' after creating our new response variable
+crime_new <- crime_updated %>% 
+  select(-'interpersviolence', -'homicides')
+colnames(crime_new)
+```
+
+Our updated dataset, `crime_new`, contains all 12 desired predictors, and 1 response variable, `crime_rates`, which is a combination of the total daily reported interpersonal violence cases and homicide cases.
+
+### Tidying Binary Variables
+
+We need to convert our categorical variables, `holidays` and `weekends` into factors.
+
+```{r}
+# Changing categorical variables to factors
+crime_new$holidays <- as.factor(crime_new$holidays)
+crime_new$weekends <- as.factor(crime_new$weekends)
+```
+
+### Missing Data
+
+```{r}
+# Check for missing data
+any(is.na(crime_new))
+```
+
+There is no missing data in this dataset, so we can move onto our visual exploratory data analysis!
+
+## Exploratory Data Analysis
+
+### Correlation Matrix of Interpersonal Violence Cases and Homicide Cases
+
+```{r}
+# Correlation plot of 'interpersviolence' and 'homicides'
+outcomes_cor_matrix <- cor(crime[, c("interpersviolence", "homicides")], use = "complete.obs")
+outcomes_corrplot <- corrplot(outcomes_cor_matrix,
+                              method = "circle",
+                              title = "Correlation Matrix of Interpersonal Violence and Homicides",
+                              addCoef.col = 1)
+```
+
+Although we have already combined `interpersviolence` and `homicides` into a single outcome variable, `crime_rates`, it is important to remain mindful that this combination may mask differences between the two types of crimes. The correlation plot between `interpersviolence` and `homicides` shows a positive weak correlation, which is important to consider as we proceed further with our analysis. Depending on our model results using `crime_rates` as the outcome variable, we may have to evaluate `interpersviolence` and `homicides` as two separate outcome variables.
+
+### Outcome Variable Distribution
+
+```{r}
+# Distribution of 'crime_rates'
+ggplot(crime_new, aes(crime_rates)) +
+  geom_bar(fill='Blue') +
+  labs(title = "Distribution of Overall Crime Rates", x = "Daily Crimes Committed", y = "Frequency") +
+  theme_minimal()
+```
+
+The distribution of overall crime rates is approximately normal but has a right skew. While the average number of crimes committed per day tends to be around 10, there are outliers with over 40 crimes in a day. Let us further examine the data to identify which factors that may have influenced the outcome.
+
+### Crime Rates by Holidays
+
+Let us take a look at the distribution of crime rates by holidays.
+
+```{r}
+# Boxplot of 'crime_rates' grouped by 'holidays'
+ggplot(crime_new, aes(x = holidays, y = crime_rates)) +
+  geom_boxplot(fill = 'lavender', color = 'black')+
+  labs(title = "Crime Rates by Holidays",
+       x = "Holidays",
+       y = "Crime Rates") +
+  theme_minimal()
+```
+
+It is interesting to note that there is a greater spread of crime rates on holidays as opposed to non-holidays, which indicates that the holiday group has more variability in the central portion of the distribution. Additionally, there appears to be a greater presence of extreme values for the holiday group, suggesting that certain holidays might be related to particular crimes. The non-holiday group has a minimum value of 0, while the holiday group has a minimum value of 2. So, for every holiday, there are at least 2 crimes committed.
+
+### Crime Rates by Weekends
+
+We are also interested in the distribution of crime rates by weekends.
+
+```{r}
+# Boxplot of 'crime_rates' grouped by 'weekends'
+ggplot(crime_new, aes(x = weekends, y = crime_rates)) +
+  geom_boxplot(fill = 'lavender', color = 'black')+
+  labs(title = "Crime Rates by Weekends",
+       x = "Weekends",
+       y = "Crime Rates") +
+  theme_minimal()
+```
+
+There is a wider distribution present of weekends as opposed to non-weekends. Surprisingly, there are greater extreme values for the non-weekend group. The non-weekend group has a minimum value of 0, while the weekend group has a minimum value of 1. This tells us that for every weekend, there is at least 1 crime committed.
+
+### Continuous Variable Correlation Plot
+
+```{r}
+# Variable Correlation Plot
+crime_new %>% 
+  select_if(is.numeric) %>% 
+  cor() %>% 
+  corrplot(method = "circle",
+                              title = "Correlation Matrix of Continuous Variables",
+           addCoef.col = 1,
+           number.cex = 0.4)
+```
+
+One notable relationship is between `humid` and `number_month`, a moderately positive correlation of 0.45. This may be an indicator of multicollinearity, as humidity varies depending on the month/season of the year.
+
+`crime_rates` and `fines` have a weak positive correlation of 0.38, suggesting a potential relationship between overall crime and driving under the influence. Although the relationship is modest, there is still an implication that higher fines may contribute to overall crime rates.
+
+In contrast, `crime_rates` and `vehicles` have a weak negative correlation of -0.34. Because vehicles serve as a proxy for overall economic conditions, this correlation can be interpreted as follows: as the number of registered vehicles increase, crime rates tend to decrease slightly. However, the correlation is weak, which implies that other factors may have a stronger influence on crime rates.
+
+We will explore these relationships further to assess our suspicions.
+
+## Preparing for Models
+
+### Data Split
+
+Before fitting models, it is imperative to split our data into a training set and a testing set. We will use the training set to train our models. Once our models are trained, we will fit the best model to the testing set and see how it truly performs. We are employing the 70/30 split, where 70% of the data goes to the training data and 30% of the data goes to the testing data. This ensures that there is data to both train our models and properly test model performance. The data split will be stratified on the outcome variable, `crime_rates`. This guarantees that the response variable is equally distributed to both the training set and the test set.
+
+```{r}
+# Set seed for reproducibility
+set.seed(12345)
+
+# 70/30 split with stratification on 'crime_rates'
+crime_split <- initial_split(crime_new, prop = 0.7, strata = crime_rates)
+crime_train <- training(crime_split)
+crime_test <- testing(crime_split)
+```
+
+Let us verify that we have correctly split data.
+
+```{r}
+overlap <- intersect(crime_train, crime_test)
+overlap
+```
+
+There is no intersection between the training and testing sets. Our split is correct.
+
+### Creating the Recipe
+
+In order to proceed with creating and fitting our models, we must create a general recipe for the data. In this recipe, we will use 12 predictors: `year`, `number_month`, `number_day`, `maxtemp`, `humid`, `precipitations`, `windspeed`, `moonlight`, `holidays`, `weekends`, `fines`, and `vehicles`. `holidays` and `weekends` will be converted into dummy variables because they are categorical. We will normalize our variables by centering and scaling.
+
+```{r}
+#Defining the Recipe
+  crime_recipe <- recipe(crime_rates ~ ., data = crime_train) %>%
+  #Dummy-code the nominal variables
+  step_dummy(holidays, weekends) %>%
+  #Center Predictors
+  step_center(all_predictors()) %>%
+  #Scale Predictors
+  step_scale(all_predictors())
+```
+
+### K-Fold Cross-Validation
+
+We are employing k-fold cross-validation on our data. This process consists of splitting the data into 'k' subsets and iteratively training and testing the model on those subsets. Some benefits of the k-fold cross-validation include but are not limited to: a better estimate of model performance, a reduction in variance in performance estimates, and a way to prevent overfitting. In this case, we will create 10 folds because our dataset size is relatively small and stratify it on our outcome variable, `crime_rates`.
+
+```{r}
+# Fold creation
+crime_folds <- vfold_cv(crime_train, v = 10, strata = crime_rates)
+```
+
+## Building Models
+
+We have carefully selected four models that will help identify which features are most influential to our response variable. We will be comparing the results of our models using the root mean square error metric, otherwise known as RMSE. A lower RMSE indicates a model with better predictive power. We will conduct further analysis on the features of the model with the lowest RMSE and fit it to our testing data!
+
+### Forward Stepwise Selection
+
+Forward stepwise selection is a reliable strategy for analyzing influential data. The `step()` function curates a model with the combination of features that produces the lowest Akaike Information Criterion (AIC). The process begins with an initial model that includes only the intercept and a final model that includes all of the predictors. Then, predictors are iteratively added onto the initial model until the model with the lowest AIC is achieved. Then, a new recipe is created based on the optimal predictors and fit the to linear regression model. Finally, the RMSE is extracted from the fit for further analysis.
+
+#### Perform Stepwise Selection
+
+```{r}
+# Define the initial model with only the intercept
+current_model <- lm(crime_rates ~ 1, data = crime_train)
+
+# Define the full model with all predictors
+full_model <- lm(crime_rates ~ year + number_month + number_day + 
+                 maxtemp + humid + precipitations + 
+                 windspeed + moonlight + fines + 
+                 vehicles + holidays + weekends, 
+                 data = crime_train)
+
+# Perform forward stepwise selection using the step() function
+#best_stepwise_model <- step(current_model, 
+                   #scope = list(lower = current_model, upper = full_model), 
+                   #direction = "forward")
+
+# Save the best model into an rda
+#save(best_stepwise_model, file = "best_stepwise_model.rda")
+
+# Load the best model back in
+load("best_stepwise_model.rda")
+
+# Display the final model after stepwise selection
+summary(best_stepwise_model)
+```
+
+According to the summary of our best model, the forward stepwise technique's most significant predictors are `weekends`, `holidays`, `year`, `fines`, `vehicles`, `humid`, and `moonlight`. We will take note of these features for future analysis (if forward stepwise regression performs better than the other 3 models).
+
+#### Create a New Recipe
+
+Now, we must define a new recipe based on those desired features. `holidays` and `weekends` are dummy-encoded for compatibility. All predictors are centered and scaled for normalization.
+
+```{r}
+#Defining the New Recipe
+  crime_stepwise_recipe <- recipe(crime_rates ~ weekends + holidays + year + fines + vehicles + humid + moonlight, data = crime_train) %>%
+  #Dummy-code the nominal variables
+  step_dummy(holidays, weekends) %>%
+  #Center Predictors
+  step_center(all_predictors()) %>%
+  #Scale Predictors
+  step_scale(all_predictors())
+```
+
+#### Set-up Model
+
+We will create a linear regression model with the engine set as `lm`.
+
+```{r}
+# Linear Regression Model
+lm_model <- linear_reg() %>% 
+  set_engine("lm")
+```
+
+#### Create Workflow
+
+We will define a workflow with the new recipe and linear regression model added.
+
+```{r}
+# Linear Regression Workflow
+lm_stepwise_workflow <- workflow() %>% 
+  add_recipe(crime_stepwise_recipe) %>% 
+  add_model(lm_model)
+```
+
+#### Fit Stepwise Linear Regression to the Folds
+
+Since the linear regression model requires no tuning, the model is directly fit to the k-fold cross validation folds.
+
+```{r}
+# Fitting linear regression to the folds
+lm_stepwise_fit <- fit_resamples(lm_stepwise_workflow, resamples = crime_folds)
+```
+
+#### Collect Metrics
+
+```{r}
+lm_stepwise_rmse <- collect_metrics(lm_stepwise_fit) %>% 
+  filter(.metric=="rmse") %>% 
+  arrange(mean) %>% 
+  slice_head(n=1)
+lm_stepwise_rmse
+```
+Finally, we have collected the best mean RMSE of the model, 5.402947, for future comparison.
+
+### LASSO Regression
+
+LASSO regression is a useful method for influential data analysis. "LASSO" is an acronym for Least Absolute Shrinkage and Selection Operator. This technique shrinks the coefficients of the variables who have little effect on the outcome to zero, eliminating them from the model. The process is as follows: define a LASSO model and workflow, create a LASSO tuning grid, tune the model, collect the RMSE, and determine which features have an existing coefficient.
+
+#### Set-up Model
+
+We will create a linear regression model with `mixture = 1` to specify LASSO regression. The `penalty` argument is specified with the `tune()` function for optimal regularization strength. The engine is set as `glmnet` and the mode is set as `regression`.
+
+```{r}
+# LASSO Regression Model
+lasso_spec <- linear_reg(penalty = tune(), 
+                         mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+```
+
+#### Create Workflow
+
+We will define a workflow with the original recipe and LASSO regression model added.
+
+```{r}
+# LASSO Regression Workflow
+lasso_workflow <- workflow() %>% 
+  add_recipe(crime_recipe) %>% 
+  add_model(lasso_spec)
+```
+
+#### Create Tuning Grid
+
+We will create a grid of regularized penalty values for tuning the LASSO regression model. The grid will consider penalty values between -3 and 4. The grid will include 20 distinct levels.
+
+```{r}
+# LASSO Grid
+lasso_grid <- grid_regular(penalty(range = c(-3,4)),
+                           levels = 20)
+```
+
+#### Tune the Model
+
+The model is tuned with the inclusion of the specified workflow, k-fold cross validation folds, tuning grid, and desired metric.
+
+```{r}
+# LASSO tuning object
+# lasso_tune <- tune_grid(lasso_workflow,
+                        # resamples = crime_folds,
+                        # grid = lasso_grid,
+                        # metrics = metric_set(rmse))
+
+# Save the tuning object into an rda
+# save(lasso_tune, file = "lasso_tune.rda")
+
+# Load the object back in
+load("lasso_tune.rda")
+```
+
+#### Collect Metrics
+
+```{r}
+lasso_rmse <- collect_metrics(lasso_tune) %>% 
+  arrange(mean) %>% 
+  filter(.metric=="rmse") %>% 
+  slice_head(n=1)
+
+lasso_rmse
+```
+We have collected the optimal mean RMSE of the model, 5.416348, with a penalty of 0.02976351, for future comparison.
+
+#### Extracting Important Variables
+
+We will choose the best hyperparameters from the `lasso_tune` object and incorporate them into the `lasso_workflow`. The updated workflow will then be fitted to the training data. We will use the `tidy()` function to extract the coefficients of the fitted model. The coefficients are filtered to retain non-zero estimates. The resulting variables can be considered influential to our outcome variable.
+
+```{r}
+best_params <- select_best(lasso_tune, metric = "rmse")
+
+final_lasso_workflow <- finalize_workflow(lasso_workflow, best_params)
+
+final_lasso_fit <- fit(final_lasso_workflow, data = crime_train)
+
+# Extract coefficients
+lasso_coefficients <- tidy(final_lasso_fit)
+
+# Filter non-zero coefficients
+important_variables <- lasso_coefficients %>%
+  filter(estimate != 0) %>%
+  arrange(desc(abs(estimate)))
+
+important_variables
+```
+
+The resulting table displays all predictors, indicating that under LASSO regression, all of the features are considered significant to the response variable. While it is not impossible, this result is bizarre and should be flagged. This could be a case of a multitude of factors: multicollinearity, model complexity, or improper data scaling. The model's hyperparameters have been adjusted to address these potential issues, and the result has remained the same. Therefore, we can conclude that the according to LASSO regression, all features are influential to overall crime rates.
+
+### Random Forest
+
+Random forests are a powerful tool for analyzing influential data due to their ability to provide insight on variable importance. This model works best at handling complex, non-linear relationships. The process consists of defining a random forest model and workflow, creating a tuning grid, collecting the RMSE of the model, and identifying significant predictors.
+
+#### Set-up Model
+
+We will create a random model with `mtry`, `trees`, `min_n` specified using the `tune()` function to find optimal hyperparameters. The engine is set to `ranger`, with `importance = "impurity"` to calculate feature importance. The mode is set as `regression`.
+
+```{r}
+# Random Forest Model
+rf_spec <- rand_forest(mtry = tune(), 
+                       trees = tune(), 
+                       min_n = tune()) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("regression")
+```
+
+#### Create Workflow
+
+We will define a workflow with the original recipe and random forest model added.
+
+```{r}
+# Random Forest Workflow
+rf_workflow <- workflow() %>% 
+  add_recipe(crime_recipe) %>% 
+  add_model(rf_spec)
+```
+
+#### Create Tuning Grid
+
+We will create a grid of regularized penalty values for tuning the random forest model. The grid will consider `mtry` values between 1 and 8, range of `trees` between 200 and 600, `min_n` between 5 and 15, and 8 distinct `levels`.
+
+```{r}
+# Random Forest Grid
+rf_grid <- grid_regular(mtry(range = c(1, 8)),
+                                  trees(range = c(200,600)),
+                                  min_n(range = c(5,15)),
+                                  levels = 8)
+```
+
+#### Tune the Model
+
+The model is tuned with the inclusion of the specified workflow, k-fold cross validation folds, tuning grid, and desired metric.
+
+```{r}
+# Random Forest
+# rf_tune <- tune_grid(rf_workflow,
+                     # resamples = crime_folds,
+                     # grid = rf_grid,
+                     # metrics = metric_set(rmse))
+
+# Save the object into an rda
+# save(rf_tune, file = "rf_tune.rda")
+
+# Load the object back in
+load("rf_tune.rda")
+```
+
+#### Collect Metrics
+
+```{r}
+# Fitting and evaluating on folds
+rf_rmse <- collect_metrics(rf_tune) %>%
+  filter(.metric=="rmse") %>% 
+  arrange(mean) %>% 
+  slice_head(n=1)
+
+rf_rmse
+```
+We have collected the best mean RMSE of the model, 5.039956, with 13 variables tried at each split, 314 trees, and 13 minimum nodes, for future comparison. 
+
+#### Variable Importance Plot on Best Random Forest Tree
+
+We will choose the best hyperparameters from the `rf_tune` object and incorporate them into the `rf_workflow`. The updated workflow will then be fitted to the training data. We will use the `vip()` function to rank the variables by their importance. 
+
+```{r}
+# Best random forest
+best_rf <- select_best(rf_tune)
+
+# Finalizing the workflow with the best random forest
+rf_final_workflow <- finalize_workflow(rf_workflow, best_rf)
+
+# Fitting the best model to the to the training dataset
+rf_final_fit <- fit(rf_final_workflow, data = crime_train)
+
+# Visualizing the best-performing pruned decision tree
+rf_final_fit %>%
+  extract_fit_parsnip() %>%
+  vip() +
+  theme_minimal()
+```
+
+According to the random forest model on training data, the most significant features, in order, are `vehicles`, `fines`, `moonlight`, `weekends`, `number_day`, `windspeed`, `number_month`, `humid`, `year`, and `maxtemp`. We will take note of this for future analysis.
+
+### Principal Component Analysis
+
+Our final model will involve principal component analysis to minimize features and reduce dimensionality. We will create a new recipe using `step_pca()`. Then, we will inspect the loadings and variability of the principal components to determine which variables are most influential to overall crime rates. Finally, we will create a final recipe with the optimal hyperparameters and fit it to a linear regression workflow.
+
+#### Create a PCA Recipe
+
+In order to perform PCA, we must define a new recipe, `crime_pca_recipe`.
+
+```{r}
+# New recipe with principal component analysis
+crime_pca_recipe <- recipe(crime_rates ~ ., data = crime_train) %>%
+  step_dummy(holidays, weekends) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_pca(all_predictors())
+```
+
+#### Print the Loadings
+
+Let us gather the loadings of all of the principal components to determine which features are most influential on our response variable.
+
+```{r}
+pca_prepped_recipe <- prep(crime_pca_recipe, training = crime_train)
+pca_step <- pca_prepped_recipe$steps[[length(pca_prepped_recipe$steps)]]
+pca_loadings <- pca_step$res$rotation
+print(pca_loadings)
+```
+
+However, before we can examine the loadings to identify which features are most influential on our response variable, we need to choose an optimal number of principal components to retain. 
+
+#### Visualizing Variance Explained by Principal Components
+
+```{r}
+# Obtaining cumulative variance of principal components
+pca_variance <- pca_step$res$sdev^2 
+proportion_variance <- pca_variance / sum(pca_variance) 
+cumulative_variance <- cumsum(proportion_variance)
+
+# Create a data frame for variance and cumulative variance
+cumulative_variance_df <- data.frame(
+  PC = seq_along(cumulative_variance),
+  Variance = cumulative_variance
+)
+
+# Create the line plot
+ggplot(cumulative_variance_df, aes(x = PC, y = Variance)) +
+  geom_line(color = "pink", size = 1) +
+  geom_point(color = "black", size = 3) +
+  labs(
+    title = "Variance Explained by Principal Components",
+    x = "Principal Component",
+    y = "Cumulative Variance"
+  ) +
+  theme_minimal()
+
+```
+
+Based on the plot and adjusting the `num_comp` value in the `step_pca()` function, the ideal number of principal components to retain before the plot begins to stabilize is 7. With 7 principal components, 79.33197% of the data's variability is captured. 
+
+#### Inspect the Loadings
+
+Now, let's visualize the loadings for the first 7 principal components to see which features had the highest impact on our response variable. 
+
+```{r}
+# Convert loadings to a data frame and add feature names
+pca_loadings_df <- as.data.frame(pca_loadings)
+pca_loadings_df$Feature <- rownames(pca_loadings_df)
+
+# Use the first 7 components and reshape
+pca_loadings_long <- melt(pca_loadings_df, id.vars = "Feature", 
+                          variable.name = "Principal_Component", 
+                          value.name = "Loading")
+
+# Add column for absolute loadings
+pca_loadings_long$Abs_Loading <- abs(pca_loadings_long$Loading)
+
+# Plot absolute loadings with the x-axis grouped by principal components
+ggplot(pca_loadings_long[pca_loadings_long$Principal_Component %in% paste0("PC", 1:7), ], 
+       aes(x = Principal_Component, y = Abs_Loading, fill = Feature)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Loadings Across First 7 Principal Components", 
+       x = "Principal Component", 
+       y = "Absolute Loading Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 46, hjust = 1)) 
+```
+
+Viewing the graph, the absolute loadings for each feature fluctuate significantly depending on the principal component. This illustrates that the data assumes a multi-dimensional structure, with each principal component capturing different aspects of the data's variability. However, we can see that there are a few features that remain consistent for PC1 and PC2.
+
+Let us create another plot to look at the loadings for the features of PC1 and PC2 more closely.
+
+```{r}
+# Gathering loadings for PC1 and PC2
+pca_loadings_subset <- pca_loadings[, 1:2]  # Select PC1 and PC2
+pca_loadings_df <- as.data.frame(pca_loadings_subset)
+pca_loadings_df$Feature <- rownames(pca_loadings_df)
+
+# Rename columns
+colnames(pca_loadings_df)[1:2] <- c("PC1", "PC2")
+
+# Plot eigenvectors
+ggplot(pca_loadings_df, aes(x = PC1, y = PC2)) +
+  geom_segment(aes(xend = PC1, yend = PC2, x = 0, y = 0), arrow = arrow(length = unit(0.1, "cm")), color = "purple") +
+  geom_text(aes(label = Feature), hjust = 0.4, vjust = 0, color = "black") +
+  labs(title = "Eigenvector Plot: Loadings for PC1 and PC2") +
+  coord_fixed() +
+  theme_minimal()
+```
+
+According to the plot, `fines`, `humid`, `number_month`, `vehicles`, `weekends`, and `windspeeds` are features that dominate the loadings for PC1 and PC2, indicating that these are the select features that have the largest effect on overall crime rates. 
+
+It is important to note that PC1 and PC2 explain only 36.30134% of the variability in the data, so this is not the most robust way of determining feature importance.
+
+#### Create a Refined PCA Recipe
+
+Now that we have an optimal number of principal components to retain, we will create a new recipe and adjust the hyperparameters in the `step_pca()` function.
+
+```{r}
+# New recipe with principal component analysis and adjusting principal components to retain
+new_crime_pca_recipe <- recipe(crime_rates ~ ., data = crime_train) %>%
+  step_dummy(holidays, weekends) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_pca(all_predictors(), num_comp = 7)
+```
+
+#### Set-up Model
+
+We will create a linear regression model with the engine set as `lm`.
+
+```{r}
+# Linear Regression Model
+lm_model <- linear_reg() %>% 
+  set_engine("lm")
+```
+
+#### Create Workflow
+
+We will define a workflow with the new PCA recipe and linear regression model added.
+
+```{r}
+# Linear Regression Workflow
+lm_pca_workflow <- workflow() %>% 
+  add_recipe(new_crime_pca_recipe) %>% 
+  add_model(lm_model)
+```
+
+#### Fit Linear Regression to the Folds
+
+Since the linear regression model requires no tuning, the model is directly fit to the k-fold cross validation folds.
+
+```{r}
+# Fitting linear regression to the folds
+lm_pca_fit <- fit_resamples(lm_pca_workflow, resamples = crime_folds)
+```
+
+#### Collect Metrics
+
+```{r}
+lm_pca_rmse <- collect_metrics(lm_pca_fit) %>%
+  filter(.metric=="rmse") %>% 
+  arrange(mean) %>% 
+  slice_head(n=1)
+
+lm_pca_rmse
+```
+
+Finally, we have collected the best mean RMSE of the model, 5.409975, for future comparison.
+
+## Model Results
+
+Now that we have all 4 models fit to the training data and metrics collected, let us compare their performance!
+
+### Comparing the RMSE of the Models
+
+```{r}
+# RMSE of all models
+rmse_results <- tibble(
+  Model = c("Random Forest", "Forward Stepwise Regression", "Principal Component Regression", "LASSO Regression"),
+  RMSE = c(rf_rmse$mean, lm_stepwise_rmse$mean, lm_pca_rmse$mean, lasso_rmse$mean)
+  ) 
+
+rmse_results
+```
+
+As we can see, the random forest model performed the best with an RMSE of 5.039956. Forward stepwise regression performed the second best with an RMSE of 5.402947. Principal component regression performed the second worst with an RMSE of 5.409975. LASSO regression performed the worst with an RMSE of 5.416348. Because random forest model performed far better than the regression models, this suggests that the data is non-linear. 
+
+Let us study the random forest model in depth.
+
+### Random Forest Autoplot
+
+Let us visualize an autoplot of the random forest model.
+
+```{r}
+autoplot(rf_tune) +
+  theme_minimal()
+```
+
+Visualizing the results of the random forest model through the autoplot can give us a better understanding of our data. We can see through the autoplot that the minimal node size does not have a large effect on our results. However, it seems as though a smaller minimal node value can produce a slightly lower RMSE. The graphs are fairly consistent across the board, with a decrease from 0 randomly selected predictors to around 2 randomly selected predictors. After around 2 randomly selected predictors, the RMSE steadily increases for all graphs. However, there are a few interesting plots to take note of. While the plots with a minimum node size of 5 are largely the same, they do vary from one another and are less consistent than the other graphs. Additionally, we can see that the plot with the lowest RMSE has a minimal node size of 13, 314 trees, and 3 randomly selected predictors. This is consistent with our results that we have previously collected.
+
+### Random Forest and Testing Data
+
+Since the random forest model had better performance than the other 3 models, let us take a look at how this model performs on the testing data.
+
+```{r}
+# Generating predictions with the test data
+crime_test_tibble <- crime_test %>%
+  bind_cols(predict(rf_final_fit, new_data = crime_test %>% select(-crime_rates)))
+
+# Calculating and printing the RMSE
+rf_test_rmse <- rmse(crime_test_tibble, truth = crime_rates, estimate = .pred)
+rf_test_rmse
+```
+
+Surprisingly, the random forest model performed even better on the testing data than on the training data! The RMSE of the random forest model on the testing data is 4.823762, while the RMSE of the random forest model on the training data is 5.039956. In order to tell if our RMSE value is actually good within the context of the rest of the data, we should take a look at the standard deviation of our response variable, `crime_rates`.
+
+```{r}
+sd(crime_test$crime_rates)
+```
+
+The standard deviation of the outcome variable in the testing data, `crime_rates` is 5.784919. Since the RMSE of the random forest model on the testing data is 4.804439, we know that our model performed fairly well! It is a good rule of thumb to have the RMSE value be at around or smaller than the standard deviation, which we have. Additionally, the range of `crime_rates` is between 1 and 44 for the testing data, so I would say the model performed pretty well at capturing overall crime rates with the given predictors.
+
+### Variable Importance Plot
+
+Let us remind ourselves of the variable importance plot that we have previously created.
+
+```{r}
+# Visualizing the best-performing pruned decision tree
+rf_final_fit %>%
+  extract_fit_parsnip() %>%
+  vip() +
+  theme_minimal()
+```
+
+Since random forest is the model with the highest accuracy, we will go further into depth with our analysis on random forest's important features than we did with the important features from the other models. `vehicles` is considered the most important feature, suggesting that the economy's performance has an impact on civilian behavior and overall crime rates. This checks out because poor economic conditions might incentivize illegal activity. `fines` is the second-most influential feature on overall crime rates. This is not surprising because this variable is a proxy for alcohol consumption, which can lead to rash and violent behavior. `moonlight` and `windspeed` are listed within the top five most important features, indicating that there might be a correlation between crime rates and outdoor conditions. In contrast, `humid` and `maxtemp` rank low on the variable importance plot, suggesting that there is minimal effect of environmental comfort factors on crime occurrence. Unsurprisingly, `weekends` ranks third on the plot, highlighting a link between criminal activity and the day of week. Further, `number_day`, `number_month`, and `year` are also listed. The season and time of year might have an affect on how many overall crimes take place on any given day. The two variables that are not listed on the variable importance plot are `holidays` and `precipitations`. This tells us that whether or not it is a holiday has minimal to no impact on the outcome variable, which is quite surprising. If we wanted to investigate this further, we might question what days are considered to be a holiday according to this dataset. `precipitations` is not listed, which aligns with the possibility that rain levels and crime rates may have little to no relationship.
+
+## Conclusion
+
+Four models have been fit to our training data: forward stepwise regression, LASSO regression, random forest, and principal component regression. Forward stepwise regression, LASSO regression, and principal component regression models performed nearly the same, with a RMSE of around 5.40-5.41. Although these metrics are not egregious, they are not ideal. The random forest model performed considerably better than the others on the training with a RMSE 5.039956. The random forest model performed even better than the training data on the testing data with an RMSE of 4.823762. This might be because unlike the other three models, random forest does not assume a linear relationship between predictors. We can assume that the success of the random forest model can be attributed to the complex non-linear nature of the data. Another benefit of the random forest is its resistance to multicollinearity, robustness to outliers, and flexibility.
+
+As aforementioned, in the pre-processing step, we combined `interpersviolence` (daily interpersonal violence rates) and `homicides` (daily homicide rates) into one outcome variable, `crime_rates` (daily crimes committed). In doing so, we generalize our response variable, masking the two different types of crimes that are committed. Since the RMSE of our models were a smaller value than that of the standard deviation of `crime_rates`, we were confident in proceeding with the generalization. While this was beneficial to us in order to create an interpretation of how the features affect overall crime rates, this analysis can be furthered by treating `interpersviolence` and `homicides` as separate response variables and comparing the results.
+
+The variable importance plot from the random forest model has shown that the top five most influential features on our outcome variable are `vehicles`, `fines`, `moonlight`, `weekends`, and `windspeed`. This suggest that economic conditions, alcohol consumption, the daily percent of illumination on the Moon's surface, whether or not it is a weekend, and weather conditions (particularly windspeed) have the largest effect on overall crime rates. These conclusions from these features are a bit general, so if we were to further our analysis, we might investigate the exact relationship between the outcome and each variable. Particularly, whether or not the relationships assume and positive or negative relationship, and why. 
+
+It is important to note that crime rates in Baranquilla, Columbia, from 2010 to 2016, are not limited to the features and data in this study. Crime rates in this region, like anywhere else, can be influenced by a vast number of factors. For instance, factors like law enforcement policies, population density, and regional conflicts, to name a few, can have a large effect on crime rates in Barranquilla. However, these models are a valuable starting point in understanding the intricacies between extraneous environmental and societal factors on crime in Barranquilla. I would love to see this study taken a step further, with research done on criminal activity in the region using additional data. Nonetheless, this analysis is a great place to start!
+
+## Sources
+
+Trujillo, Juan C.; Howley, Peter (2018), “Dataset for weather and crime in Barranquilla, Colombia”, Mendeley Data, V1, doi: 10.17632/836wyfy5rn.1
