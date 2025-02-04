@@ -1,16 +1,10 @@
 Uncovering Crime Trends: An Inferential Analysis of Crime Rates and Influencing Factors in Barranquilla, Colombia
 
-Author
+Author: Valerie De La Fuente
 
-Valerie De La Fuente
+Course: Statistical Machine Learning (PSTAT 131)
 
-Course
-
-PSTAT 131
-
-Date
-
-December 8, 2024
+Date: December 8, 2024
 
 Abstract
 
