@@ -8,7 +8,7 @@ Date: December 8, 2024
 
 Abstract
 
-This study investigates crime trends and their underlying factors in Barranquilla, Colombia, using inferential statistical methods and machine learning. By analyzing crime data alongside socio-economic and environmental variables, we aim to uncover patterns that can inform crime prevention strategies. The study employs linear regression modeling, principal component analysis, lasso regression, random forests, and data visualization techniques to explore relationships between crime rates and influencing factors, providing actionable insights into urban crime dynamics.
+This study investigates crime trends and their underlying factors in Barranquilla, Colombia, using inferential statistical methods and machine learning. By analyzing crime data alongside socio-economic and environmental variables, we aim to uncover patterns that can inform crime prevention strategies. The study employs modeling such as stepwise regression, principal component analysis, lasso regression, and random forest techniques to explore relationships between crime rates and influencing factors, providing actionable insights into urban crime dynamics.
 
 Repository Contents
 
